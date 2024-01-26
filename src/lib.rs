@@ -50,6 +50,69 @@ pub fn get_args() -> Result<Config> {
 }
 
 pub fn run(config: Config) -> Result<()> {
-    dbg!(config);
+    println!("pattern \"{}\"", config.pattern);
+
+    let entries = find_files(&config.files, config.recursive);
+    for entry in entries {
+        match entry {
+            Err(err) => eprintln!("{err}"),
+            Ok(filename) => println!("file \"{filename}\""),
+        }
+    }
     Ok(())
+}
+
+fn find_files(paths: &[String], recursive: bool) -> Vec<Result<String>> {
+    todo!()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_files;
+    use rand::{distributions::Alphanumeric, Rng};
+
+    #[test]
+    fn test_find_files() {
+        // 存在することがわかっているファイルを見つけられることを確認する
+        let files = find_files(&["./tests/inputs/fox.txt".to_string()], false);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].as_ref().unwrap(), "./tests/inputs/fox.txt");
+
+        // recursiveなしの場合、ディレクトリを拒否する
+        let files = find_files(&["./tests/inputs".to_string()], false);
+        assert_eq!(files.len(), 1);
+        if let Err(e) = &files[0] {
+            assert_eq!(e.to_string(), "./tests/inputs is a directory");
+        }
+
+        // ディレクトリ内の4つのファイルを再帰的に検索できることを確認する
+        let res = find_files(&["./tests/inputs".to_string()], true);
+        let mut files: Vec<String> = res
+            .iter()
+            .map(|r| r.as_ref().unwrap().replace('\\', "/"))
+            .collect();
+        files.sort();
+        assert_eq!(files.len(), 4);
+        assert_eq!(
+            files,
+            vec![
+                "./tests/inputs/bustle.txt",
+                "./tests/inputs/empty.txt",
+                "./tests/inputs/fox.txt",
+                "./tests/inputs/nobody.txt",
+            ]
+        );
+
+        // 存在しないファイルを表すランダムな文字列を生成する
+        let bad: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(7)
+            .map(char::from)
+            .collect();
+
+        // エラーとして不正なファイルを返すことを確認する
+        let files = find_files(&[bad], false);
+        assert_eq!(files.len(), 1);
+        assert!(files[0].is_err());
+    }
 }
