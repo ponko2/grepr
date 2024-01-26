@@ -2,9 +2,11 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use regex::{Regex, RegexBuilder};
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{self, BufRead, BufReader},
+    mem, vec,
 };
+use walkdir::WalkDir;
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -54,20 +56,32 @@ pub fn get_args() -> Result<Config> {
 }
 
 pub fn run(config: Config) -> Result<()> {
-    println!("pattern \"{}\"", config.pattern);
-
     let entries = find_files(&config.files, config.recursive);
+    let num_files = entries.len();
+    let print = |filename: &str, value: &str| {
+        if num_files > 1 {
+            print!("{filename}:{value}");
+        } else {
+            print!("{value}");
+        }
+    };
     for entry in entries {
         match entry {
             Err(err) => eprintln!("{err}"),
             Ok(filename) => match open(&filename) {
                 Err(err) => eprintln!("{filename}: {err}"),
-                Ok(file) => {
-                    println!(
-                        "Found {:?}",
-                        find_lines(file, &config.pattern, config.invert_match)
-                    );
-                }
+                Ok(file) => match find_lines(file, &config.pattern, config.invert_match) {
+                    Err(err) => eprintln!("{err}"),
+                    Ok(matches) => {
+                        if config.count {
+                            print(&filename, &format!("{}\n", matches.len()));
+                        } else {
+                            for line in &matches {
+                                print(&filename, line);
+                            }
+                        }
+                    }
+                },
             },
         }
     }
@@ -82,11 +96,45 @@ fn open(filename: &str) -> Result<Box<dyn BufRead>> {
 }
 
 fn find_lines<T: BufRead>(mut file: T, pattern: &Regex, invert_match: bool) -> Result<Vec<String>> {
-    todo!()
+    let mut matches = vec![];
+    let mut buf = String::new();
+    while file.read_line(&mut buf)? > 0 {
+        if pattern.is_match(&buf) ^ invert_match {
+            matches.push(mem::take(&mut buf));
+        }
+        buf.clear();
+    }
+    Ok(matches)
 }
 
 fn find_files(paths: &[String], recursive: bool) -> Vec<Result<String>> {
-    todo!()
+    let mut results = vec![];
+    for path in paths {
+        match path.as_str() {
+            "-" => results.push(Ok(path.to_string())),
+            _ => match fs::metadata(path) {
+                Ok(metadata) => {
+                    if metadata.is_dir() {
+                        if recursive {
+                            WalkDir::new(path)
+                                .into_iter()
+                                .flatten()
+                                .filter(|entry| entry.file_type().is_file())
+                                .for_each(|entry| {
+                                    results.push(Ok(entry.path().display().to_string()))
+                                });
+                        } else {
+                            results.push(Err(anyhow!("{path} is a directory")))
+                        }
+                    } else if metadata.is_file() {
+                        results.push(Ok(path.to_string()));
+                    }
+                }
+                Err(err) => results.push(Err(anyhow!("{path}: {err}"))),
+            },
+        }
+    }
+    results
 }
 
 #[cfg(test)]
